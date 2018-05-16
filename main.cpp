@@ -1,4 +1,4 @@
-#include <iostream>
+﻿#include <iostream>
 #include <sstream>
 #include <vector>
 #include <iostream>
@@ -79,8 +79,8 @@ string toString(const Matrix& matrix)
 //////////////////////////////////////
 int main() {
 
-  for (int th=4; th<5; th++) {
-        for (int s=1000; s<2001; s+=500) {
+  for (int th=2; th<5; th++) {
+        for (int s=500; s<2001; s+=500) {
                 double sumTime=0;
                 for (int b=0; b<10; b++) {
   double t1 = omp_get_wtime();
