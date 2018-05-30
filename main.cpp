@@ -1,16 +1,17 @@
-﻿#include <iostream>
+#include <iostream>
+#include <iomanip>
+#include <cstdlib>
+#include <omp.h>
+#include <cmath>
 #include <sstream>
 #include <vector>
-#include <iostream>
 #include <string>
-
 #include <algorithm>
 #include <chrono>
-#include <math.h>
 #include <random>
 #include <getopt.h>
 #include <ctime>
-#include <omp.h>
+
 
 using namespace std;
 
@@ -43,15 +44,12 @@ private:
   size_t m_cols;
   vector<double> m_data;
 };
-
-//////////////////////////////////////////////
-Matrix Matrix::operator*(const Matrix& matrix)
-{
+Matrix Matrix::operator*(const Matrix& matrix){
     Matrix res(m_rows, matrix.m_cols);
 
     if (m_cols == matrix.m_rows) {
 
-        #pragma omp parallel for
+       // #pragma omp parallel for
         for (int i = 0; i < res.m_rows; ++i)
             for (int j = 0; j < res.m_cols; ++j)
                 for (int k = 0; k < m_rows; ++k)
@@ -62,72 +60,127 @@ Matrix Matrix::operator*(const Matrix& matrix)
     return res;
 
 }
-
-//////////////////////////////////////////////
-string toString(const Matrix& matrix)
-{
-	stringstream ss;
-	for (size_t i = 0; i < matrix.rows(); ++i) {
-		for (size_t j = 0; j < matrix.cols(); ++j) {
-			ss << matrix(i, j) << " ";
-		}
-		ss << endl;
-	}
-	return ss.str();
+double F(double x, double y){
+    return 0;
 }
-
-//////////////////////////////////////
-int main() {
-
-  for (int th=2; th<5; th++) {
-        for (int s=500; s<2001; s+=500) {
-                double sumTime=0;
-                for (int b=0; b<10; b++) {
-  double t1 = omp_get_wtime();
-  omp_set_num_threads(th);
-
-   size_t rows = s;
-   size_t cols = s;
-
-  Matrix A(rows, cols);
-  Matrix B(rows, cols);
-  Matrix C(rows, cols);
-
-  random_device rd;
-  #pragma omp parallel
- {
-    uint32_t seed;
-    #pragma omp critical
-    {
-      seed = rd();
+double G(double x, double y){
+    if (x==0) return 1-2*y;
+    if (x==1) return -1+2*y;
+    if (y==0) return 1-2*x;
+    if (y==1) return -1+2*x;
+}
+void UOutput(Matrix &u) {
+    cout << fixed << setprecision(3);
+    for (size_t i = 0; i <11; i++) {
+        for (int j = 0; j <11; j++)
+        cout << setw(7) << u(i,j);
+        cout << endl;
     }
-    mt19937 gen(seed);
-    uniform_real_distribution<double> dist(0.0, 1.0);
-
-  #pragma omp for
-  for(size_t i = 0; i < A.rows(); ++i) {
-    for(size_t j = 0; j < A.cols(); ++j) {
-
-       A(i, j) = dist(gen);
-       B(i, j) = dist(gen);
-       C(i, j) = 0;
+}
+void Init(Matrix &f,Matrix &u, double h){
+    for (size_t i = 0; i < f.rows()-2; i++) {
+        for (size_t j = 0; j < f.cols()-2; j++)
+            f(i,j) = F((i+1)*h, (j+1)*h);
     }
-  }
- }
-
-  //cout << toString(A) << endl;
-  //cout << toString(B) << endl;
-  C = A * B;
-  //cout << toString(C) << endl;
-  double t2 = omp_get_wtime();
-  sumTime += (t2 - t1);
-  cout << "Threads: " << omp_get_max_threads();
-  cout << " Size: "<<s;
-  cout << " Worked time: " << (t2 - t1)<< "\n";
+    for (int i = 1; i < u.rows()-1; i++) {
+        for (int j = 1; j < u.rows()-1; j++) u(i,j) = 0;
+        u(i,0) = G(i*h, 0);
+        u(i,u.rows()-1) = G(i*h, (u.rows()-1)*h);
+    }
+    for (int j = 0; j < u.rows(); j++) {
+        u(0,j) = G(0,j*h);
+        u(u.rows()-1,j) = G((u.rows()-1)*h,j*h);
+    }
+    UOutput(u);
 }
-  double midTime = sumTime/10;
-  cout<< "Middle time: "<<midTime<<endl;
-}}
-  return 0;
+void Calc(Matrix &f,Matrix &u, double h, double eps, int &IterCnt){
+    double max;
+    do{
+        IterCnt++;
+        max = 0;
+        for (int i = 1; i < u.rows()-1; i++)
+            for (int j = 1; j < u.cols()-1; j++){
+                double u0 = u(i,j);
+                u(i,j) = 0.25*(u(i-1,j) + u(i+1,j)+ u(i,j-1) + u(i,j+1) - h*h*f(i-1,j-1));
+                double d = abs(u(i,j)-u0);
+                if (d > max) max = d;
+            }
+    }
+    while (max > eps);
 }
 
+void OMPCalc3(Matrix &f,Matrix &u, double h, double eps, int &IterCnt){
+    double max;
+    int N = f.rows();
+    double *mx = new double[N];
+    IterCnt = 0;
+    do{
+    IterCnt++;
+    #pragma omp parallel for shared(u,N,max) num_threads(1)
+    for (int k = 1; k < N-1; k++){
+        mx[k] = 0;
+        //schedule()// num_threads(1)
+        for (int i = 1; i < k-1; i++){
+            int j = k + 1 - i;
+            double u0 = u(i,j);
+            u(i,j) = 0.25*(u(i-1,j) + u(i+1,j)+ u(i,j-1) + u(i,j+1) - h*h*f(i-1,j-1));
+            double d = abs(u(i,j)-u0);
+            if (d > mx[i])
+            mx[i] = d;
+        }
+    }
+    #pragma omp parallel for shared(u,N,max) num_threads(1) //schedule(static, 1)
+    for (int k = N-1; k > 0; k--) {
+        //#pragma omp parallel for shared(u,N,max) num_threads(2)////
+        for (int i = N-k+1; i < N-1; i++) {
+            int j = 2*N - k - i + 1;
+            double u0 = u(i,j);
+            u(i,j) = 0.25*(u(i-1,j) + u(i+1,j)+ u(i,j-1) + u(i,j+1) - h*h*f(i-1,j-1));
+            double d = abs(u(i,j)-u0);
+            if (d > mx[i])
+            mx[i] = d;
+        }
+    }
+    max = 0;
+   #pragma omp parallel for shared(N,max) num_threads(1)
+    for (int i = 1; i < 3; i++) {
+        double d = 0;
+        for (int j = i; j < N+1; j+=2)
+            if (d < mx[j])
+                d = mx[j];
+            if (d > max)
+                #pragma omp critical
+            if (d > max)
+            max = d;
+        }
+    }
+    while (max > eps);
+}
+
+int main(){
+    size_t N = 1001;
+    double eps = 0.001;
+    double h = 0.001;
+    int IterCnt1 = 0;
+    int IterCnt2 = 0;
+
+    size_t rows = N;
+    size_t cols = N;
+
+    Matrix f(rows, cols);
+    Matrix u(rows, cols);
+
+
+    Init(f, u, h);
+    double tt= omp_get_wtime();
+    //Calc(f, u, h, eps, IterCnt1);
+    tt = omp_get_wtime() - tt;
+    double tt1= omp_get_wtime();
+    OMPCalc3(f, u, h, eps, IterCnt2);
+    tt1 = omp_get_wtime() - tt1;
+    cout << "Time1 = " << tt << " IterCnt = " << IterCnt1 << endl;
+    cout << "Time2 = " << tt1 << " IterCnt = " << IterCnt2 << endl;
+    UOutput(u);
+    cin.get();
+    return 0;
+}
